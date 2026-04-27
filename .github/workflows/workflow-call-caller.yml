@@ -1,0 +1,10 @@
+name: Vector - Workflow Call Caller
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  call-reusable:
+    uses: ./.github/workflows/reusable.yml
+    with:
+      command: "echo 'ATTACKER_INPUT' && echo ${{ secrets.FAKE_SECRET }}"
