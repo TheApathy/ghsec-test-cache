@@ -1,0 +1,32 @@
+name: Cache Poison Test
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      
+      - name: Install dependencies
+        run: npm ci 2>/dev/null || echo "No package-lock.json yet"
+      
+      - name: Show cache contents
+        run: |
+          echo "=== CACHE CONTENTS ==="
+          ls node_modules/ 2>/dev/null | head -10 || echo "(empty)"
+          echo "======================"
+      
+      - name: Simulate build
+        run: echo "Build complete"
