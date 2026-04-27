@@ -1,0 +1,19 @@
+name: Vector - Reusable Workflow
+on:
+  workflow_call:
+    inputs:
+      command:
+        required: true
+        type: string
+        description: 'Command to run'
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute input
+        run: |
+          echo "=== WORKFLOW CALL INPUT ==="
+          echo "Input command: ${{ inputs.command }}"
+          echo "==========================="
