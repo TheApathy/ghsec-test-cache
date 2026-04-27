@@ -1,0 +1,17 @@
+name: Vector - Submodule Injection
+on: [pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build
+        run: |
+          echo "=== SUBMODULE INJECTION ==="
+          echo "If attacker controls a submodule, they control build process"
+          echo "actions/checkout with submodules: recursive pulls attacker code"
+          echo "Attacker can modify .gitmodules in their fork PR"
+          echo "=============================="
