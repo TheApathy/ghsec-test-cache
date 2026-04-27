@@ -1,0 +1,14 @@
+name: Vector - Typosquatting Detection
+on: [push]
+
+jobs:
+  check-actions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect typosquatted actions
+        run: |
+          echo "=== TYPOSQUATTING DETECTION ==="
+          echo "This workflow would scan for actions that look similar to trusted ones"
+          echo "Example: actions/cheeckout vs actions/checkout"
+          echo "================================="

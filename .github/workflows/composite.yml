@@ -1,0 +1,17 @@
+name: Vector - Composite Action Injection
+on: [push]
+
+jobs:
+  test-composite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Simulate composite action
+        run: |
+          echo "=== COMPOSITE ACTION INJECTION ==="
+          echo "A composite action can wrap a trusted action and add malicious steps"
+          echo "Example:"
+          echo "  uses: attacker/gh-action-wrapper@v1"
+          echo "  → internally calls actions/checkout@v4"
+          echo "  → but also exfiltrates secrets"
+          echo "==================================="
