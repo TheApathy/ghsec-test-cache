@@ -1,0 +1,30 @@
+name: Toxic Combo 6 - Secrets Without Environment
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  no-env:
+    runs-on: ubuntu-latest
+    # NO environment specified - secrets are accessible directly
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show secrets accessible without environment
+        run: |
+          echo "=== SECRETS WITHOUT ENVIRONMENT ==="
+          echo "Event: ${{ github.event_name }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "FAKE_SECRET present: ${{ secrets.FAKE_SECRET != '' && 'YES' || 'NO' }}"
+          echo "AWS_KEY present: ${{ secrets.AWS_ACCESS_KEY_ID != '' && 'YES' || 'NO' }}"
+          echo "==================================="
+
+  with-env:
+    runs-on: ubuntu-latest
+    environment: protected-env
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show secrets with environment
+        run: |
+          echo "=== SECRETS WITH ENVIRONMENT ==="
+          echo "This job requires environment approval"
+          echo "==================================="
