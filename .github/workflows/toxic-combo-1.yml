@@ -1,0 +1,29 @@
+name: Toxic Combo 1 - Cache to Deploy
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: ["Cache Poison Test"]
+    types: [completed]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/test-cache
+          key: test-cache-${{ github.event.pull_request.number || 'main' }}
+          restore-keys: |
+            test-cache-
+      - name: Check cache contents
+        run: |
+          echo "=== CACHE CONTENTS AT DEPLOY TIME ==="
+          ls -la /tmp/test-cache/ 2>/dev/null || echo "(cache empty)"
+          cat /tmp/test-cache/data.txt 2>/dev/null || echo "(no data.txt)"
+          echo "======================================="
+      - name: Simulate deploy
+        run: |
+          echo "Deploying with cache content:"
+          cat /tmp/test-cache/data.txt 2>/dev/null || echo "(empty)"
