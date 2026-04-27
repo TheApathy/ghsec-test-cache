@@ -1,0 +1,23 @@
+name: Vector - Artifact Trusted Consumer
+on:
+  workflow_run:
+    workflows: ["Vector - Artifact Poison Upload"]
+    types: [completed]
+
+jobs:
+  consume:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download poisoned artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: ./build/
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+      
+      - name: Use artifact (show poison)
+        run: |
+          echo "=== Trusted workflow using artifact ==="
+          cat ./build/metadata.txt
+          echo "--- If this shows attacker secret, artifact overwrite works ---"

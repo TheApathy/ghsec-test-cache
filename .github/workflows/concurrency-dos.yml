@@ -1,0 +1,23 @@
+name: Vector - Concurrency DoS
+on:
+  pull_request:
+
+concurrency:
+  group: test-concurrency-group
+  cancel-in-progress: true
+
+jobs:
+  slow-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Simulate long-running work
+        run: |
+          echo "Starting work..."
+          sleep 60
+          echo "Work complete (if you see this, I wasn't cancelled)"
+      
+      - name: Report status
+        run: |
+          echo "PR: ${{ github.event.pull_request.number }}"
+          echo "Branch: ${{ github.head_ref }}"
+          echo "Actor: ${{ github.actor }}"

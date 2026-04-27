@@ -1,0 +1,22 @@
+name: Vector - Cross-PR Cache Trusted Consumer
+on:
+  push:
+    branches: [main]
+
+jobs:
+  consume-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore cache (should get attacker's poison)
+        uses: actions/cache@v4
+        with:
+          path: ./cache-data
+          key: cross-pr-cache-test-${{ runner.os }}
+          restore-keys: |
+            cross-pr-cache-test-
+      
+      - name: Show what we got
+        run: |
+          echo "=== Trusted workflow reading cache ==="
+          cat ./cache-data/config.txt || echo "No cache found"
+          echo "--- If this shows attacker data, cross-PR cache contamination works ---"

