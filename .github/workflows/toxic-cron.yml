@@ -1,0 +1,22 @@
+name: Toxic Combo 7 - Cron + External Data
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Daily (won't actually run frequently in test)
+  workflow_dispatch:
+
+jobs:
+  fetch-and-process:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch external data
+        run: |
+          echo "=== CRON + EXTERNAL DATA ==="
+          echo "Simulating fetch from external API..."
+          echo "If this API is compromised, attacker controls workflow input"
+          echo "Event: ${{ github.event_name }}"
+          echo "=============================="
+      - name: Process potentially untrusted data
+        run: |
+          echo "Processing external data with secret context..."
+          echo "Secret present: ${{ secrets.FAKE_SECRET != '' && 'YES' || 'NO' }}"
