@@ -1,0 +1,26 @@
+name: Vector - Reusable Workflow v2
+on:
+  workflow_call:
+    inputs:
+      command:
+        required: true
+        type: string
+        description: 'Command to execute'
+      environment:
+        required: false
+        type: string
+        default: 'production'
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute user input
+        run: |
+          echo "=== REUSABLE WORKFLOW ==="
+          echo "Input command: ${{ inputs.command }}"
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Secret present: ${{ secrets.FAKE_SECRET != '' && 'YES' || 'NO' }}"
+          echo "========================="

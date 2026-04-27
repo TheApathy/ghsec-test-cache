@@ -1,0 +1,11 @@
+name: Vector - Workflow Call Caller v2
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  call-reusable:
+    uses: ./.github/workflows/reusable-v2.yml
+    with:
+      command: "echo 'ATTACKER_INPUT_FROM_ISSUE'"
+      environment: "production"
