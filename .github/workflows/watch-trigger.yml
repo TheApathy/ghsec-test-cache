@@ -1,0 +1,15 @@
+name: Vector - Watch (Star) Trigger
+on:
+  watch:
+    types: [started]
+
+jobs:
+  log-star:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log star event
+        run: |
+          echo "Repository starred!"
+          echo "Actor: ${{ github.actor }}"
+          echo "Event: ${{ github.event.action }}"
+          echo "Secret test: ${{ secrets.FAKE_SECRET }}"

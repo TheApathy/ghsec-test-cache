@@ -1,0 +1,13 @@
+name: Vulnerable Composite Action
+inputs:
+  user-input:
+    required: true
+    description: Attacker-controlled input
+runs:
+  using: composite
+  steps:
+    - name: Vulnerable step
+      shell: bash
+      run: |
+        echo "User input: ${{ inputs.user-input }}"
+        echo "Secret: ${{ env.ACTION_SECRET }}"

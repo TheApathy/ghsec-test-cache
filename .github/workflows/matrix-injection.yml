@@ -1,0 +1,15 @@
+name: Vector - Matrix Injection
+on:
+  pull_request:
+
+jobs:
+  matrix-job:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test: ["${{ github.event.pull_request.title }}", "${{ github.event.pull_request.body }}"]
+    steps:
+      - name: Echo matrix value
+        run: |
+          echo "Matrix value: ${{ matrix.test }}"
+          echo "This demonstrates attacker-controlled matrix expansion"

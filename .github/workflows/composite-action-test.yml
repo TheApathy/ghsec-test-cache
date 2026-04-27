@@ -1,0 +1,15 @@
+name: Vector - Composite Action Injection
+on:
+  issues:
+
+jobs:
+  test-composite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Call vulnerable composite action
+        uses: ./.github/workflows/batch3/composite-action
+        with:
+          user-input: ${{ github.event.issue.title }}
+        env:
+          ACTION_SECRET: ${{ secrets.FAKE_SECRET }}

@@ -1,0 +1,10 @@
+name: Vector - Reusable Workflow Caller
+on:
+  issues:
+
+jobs:
+  call-reusable:
+    uses: ./.github/workflows/batch3/reusable-injection.yml
+    with:
+      payload: ${{ github.event.issue.title }}
+    secrets: inherit

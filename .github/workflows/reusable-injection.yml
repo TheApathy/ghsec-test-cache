@@ -1,0 +1,16 @@
+name: Vector - Reusable Workflow Injection
+on:
+  workflow_call:
+    inputs:
+      payload:
+        required: true
+        type: string
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Process payload (vulnerable)
+        run: |
+          echo "Received payload: ${{ inputs.payload }}"
+          echo "This shows reusable workflow inheritance of secrets: ${{ secrets.FAKE_SECRET }}"

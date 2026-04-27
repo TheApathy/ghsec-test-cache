@@ -1,0 +1,17 @@
+name: Vector - Environment Protection Bypass
+on:
+  deployment:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ github.event.deployment.environment_url }}
+    steps:
+      - name: Deploy to production
+        run: |
+          echo "Deploying to production..."
+          echo "Environment URL: ${{ github.event.deployment.environment_url }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Secrets accessible: YES - ${{ secrets.FAKE_SECRET }}"
