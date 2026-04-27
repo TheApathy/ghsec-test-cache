@@ -1,0 +1,23 @@
+name: Toxic Combo 5 - repository_dispatch External Trigger
+on:
+  repository_dispatch:
+    types: [external-event, webhook-callback]
+
+jobs:
+  process-external:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log external payload
+        run: |
+          echo "=== REPOSITORY_DISPATCH TRIGGER ==="
+          echo "Event: ${{ github.event_name }}"
+          echo "Action type: ${{ github.event.action }}"
+          echo "Client payload: ${{ toJson(github.event.client_payload) }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Secret present: ${{ secrets.FAKE_SECRET != '' && 'YES' || 'NO' }}"
+          echo "==================================="
+      - name: Process payload
+        run: |
+          echo "Payload data: ${{ github.event.client_payload.data }}"
+          echo "Payload source: ${{ github.event.client_payload.source }}"
