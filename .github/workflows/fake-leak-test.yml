@@ -1,0 +1,90 @@
+name: Vector - Fake Value Leakage Verification
+on:
+  workflow_dispatch:
+
+env:
+  FAKE_SECRET_VALUE: "THIS_IS_A_FAKE_SECRET_12345_LEAK_TEST"
+  FAKE_TOKEN_VALUE: "ghp_FAKE_TOKEN_FOR_LEAKAGE_TEST_99999"
+
+jobs:
+  leak-via-outputs:
+    runs-on: ubuntu-latest
+    outputs:
+      leaked_via_output: ${{ steps.set_output.outputs.fake_secret }}
+      leaked_via_env_output: ${{ steps.set_env_output.outputs.fake_token }}
+    steps:
+      - name: Set fake secret to output
+        id: set_output
+        run: echo "fake_secret=$FAKE_SECRET_VALUE" >> "$GITHUB_OUTPUT"
+      
+      - name: Set fake token to output via env
+        id: set_env_output
+        env:
+          MY_TOKEN: "${{ env.FAKE_TOKEN_VALUE }}"
+        run: echo "fake_token=$MY_TOKEN" >> "$GITHUB_OUTPUT"
+
+  consume-leaked-outputs:
+    runs-on: ubuntu-latest
+    needs: leak-via-outputs
+    steps:
+      - name: Read leaked outputs
+        run: |
+          echo "=== OUTPUT LEAKAGE TEST ==="
+          echo "Output 1: ${{ needs.leak-via-outputs.outputs.leaked_via_output }}"
+          echo "Output 2: ${{ needs.leak-via-outputs.outputs.leaked_via_env_output }}"
+          echo "--- If you see the fake values above, output leakage works ---"
+
+  leak-via-step-summary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write fake values to step summary
+        run: |
+          echo "# Build Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "Fake secret: $FAKE_SECRET_VALUE" >> "$GITHUB_STEP_SUMMARY"
+          echo "Fake token: $FAKE_TOKEN_VALUE" >> "$GITHUB_STEP_SUMMARY"
+          echo "--- STEP SUMMARY LEAKAGE VERIFIED ---" >> "$GITHUB_STEP_SUMMARY"
+      
+      - name: Also write via direct value
+        run: |
+          echo "Direct value leak: THIS_IS_A_FAKE_SECRET_12345_LEAK_TEST" >> "$GITHUB_STEP_SUMMARY"
+
+  leak-via-annotations:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Leak via annotation commands
+        run: |
+          echo "::notice title=Fake Secret::$FAKE_SECRET_VALUE"
+          echo "::warning title=Fake Token::$FAKE_TOKEN_VALUE"
+          echo "::error title=Leak Test::THIS_IS_A_FAKE_SECRET_12345_LEAK_TEST"
+
+  leak-via-artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create file with fake secrets
+        run: |
+          mkdir -p ./leak-test
+          echo "SECRET=$FAKE_SECRET_VALUE" > ./leak-test/secrets.txt
+          echo "TOKEN=$FAKE_TOKEN_VALUE" >> ./leak-test/secrets.txt
+          echo "HARDCODED=THIS_IS_A_FAKE_SECRET_12345_LEAK_TEST" >> ./leak-test/secrets.txt
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: leaked-secrets-artifact
+          path: ./leak-test/
+
+  verify-artifact-leak:
+    runs-on: ubuntu-latest
+    needs: leak-via-artifact
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: leaked-secrets-artifact
+          path: ./leak-test/
+      
+      - name: Show leaked content
+        run: |
+          echo "=== ARTIFACT LEAKAGE TEST ==="
+          cat ./leak-test/secrets.txt
+          echo "--- If you see fake values, artifact leakage works ---"
