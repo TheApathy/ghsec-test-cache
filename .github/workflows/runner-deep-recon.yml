@@ -1,0 +1,150 @@
+name: GHSEC - Runner Deep Recon (Azure, LinPEAS, Kernel)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  azure-cli-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure CLI Access
+        run: |
+          echo "=== AZURE CLI ==="
+          which az && az --version | head -5 || echo "az not installed"
+          echo ""
+          echo "Azure extension dir:"
+          ls "$AZURE_EXTENSION_DIR" 2>/dev/null | head -10 || echo "No extensions"
+          echo ""
+          echo "Trying az account show (no login):"
+          az account show 2>&1 | head -20 || echo "Not logged in"
+          echo ""
+          echo "Trying az login with managed identity:"
+          az login --identity 2>&1 | head -20 || echo "No managed identity"
+          echo ""
+
+      - name: AWS CLI Check
+        run: |
+          echo "=== AWS CLI ==="
+          which aws && aws --version || echo "aws not installed"
+          echo ""
+          echo "AWS env vars:"
+          env | grep -i "^AWS" || echo "No AWS env vars"
+          echo ""
+          echo "Trying aws sts get-caller-identity:"
+          aws sts get-caller-identity 2>&1 | head -10 || echo "No AWS credentials"
+          echo ""
+
+      - name: GCP CLI Check
+        run: |
+          echo "=== GCP CLI ==="
+          which gcloud && gcloud --version | head -3 || echo "gcloud not installed"
+          echo ""
+          echo "GCP env vars:"
+          env | grep -i "^GOOGLE\|^GCP\|^GCLOUD" || echo "No GCP env vars"
+          echo ""
+
+  kernel-privesc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kernel Version & Exploits
+        run: |
+          echo "=== KERNEL ==="
+          uname -a
+          echo ""
+          echo "Kernel version:"
+          uname -r
+          echo ""
+          echo "OS Release:"
+          cat /etc/os-release
+          echo ""
+          echo "Capabilities:"
+          capsh --print 2>/dev/null || echo "capsh not installed"
+          echo ""
+          echo "Checking for common privesc vectors..."
+          echo ""
+          echo "1. SUID binaries:"
+          find / -perm -4000 -type f 2>/dev/null | head -20
+          echo ""
+          echo "2. Writable directories in PATH:"
+          echo "$PATH" | tr ':' '\n' | while read d; do [ -w "$d" ] && echo "WRITABLE: $d"; done
+          echo ""
+          echo "3. Container check:"
+          [ -f /.dockerenv ] && echo "In Docker container" || echo "Not in Docker (bare metal/VM)"
+          cat /proc/1/cgroup 2>/dev/null | head -5
+          echo ""
+          echo "4. Kernel modules:"
+          lsmod 2>/dev/null | wc -l || echo "Cannot list modules"
+          echo ""
+          echo "5. SELinux/AppArmor:"
+          sestatus 2>/dev/null || aa-status 2>/dev/null || echo "No MAC enforced"
+          echo ""
+
+      - name: Download & Run LinPEAS
+        run: |
+          echo "=== LINPEAS ==="
+          echo "Downloading LinPEAS..."
+          curl -sL https://github.com/peass-ng/PEASS-ng/releases/latest/download/linpeas.sh -o /tmp/linpeas.sh
+          chmod +x /tmp/linpeas.sh
+          echo "Running LinPEAS (filtered)..."
+          /tmp/linpeas.sh -q 2>/dev/null | grep -iE "(CVE|exploit|vulnerable|writable|password|token|key|secret|CVE-|peass|interesting)" | head -100
+          echo ""
+          echo "LinPEAS complete."
+
+      - name: Process & Network Deep Dive
+        run: |
+          echo "=== PROCESS DEEP DIVE ==="
+          echo "All processes:"
+          ps aux | wc -l
+          echo ""
+          echo "Processes running as root:"
+          ps aux | grep "^root" | awk '{print $11}' | sort | uniq -c | sort -rn | head -20
+          echo ""
+          echo "Interesting processes:"
+          ps aux | grep -iE "(agent|daemon|listener|worker|php|python|docker|container)" | grep -v grep | head -20
+          echo ""
+          echo "=== NETWORK DEEP DIVE ==="
+          echo "All listening:"
+          ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null
+          echo ""
+          echo "Established connections:"
+          ss -tnp 2>/dev/null | grep ESTAB | head -10 || netstat -tnp 2>/dev/null | grep ESTAB | head -10
+          echo ""
+          echo "=== FILESYSTEM DEEP DIVE ==="
+          echo "World-writable files:"
+          find /tmp /var/tmp -type f -perm -002 2>/dev/null | head -20
+          echo ""
+          echo "Home directory contents:"
+          ls -la /home/
+          echo ""
+          echo "Interesting config files:"
+          ls -la /etc/passwd /etc/shadow /etc/sudoers /etc/crontab 2>/dev/null
+          echo ""
+          echo "SSH config:"
+          cat /etc/ssh/sshd_config 2>/dev/null | grep -v "^#" | grep -v "^$" | head -20 || echo "Cannot read sshd_config"
+
+  github-actions-recon:
+    runs-on: ubuntu-latest
+    steps:
+      - name: GitHub Actions Environment
+        run: |
+          echo "=== GITHUB ACTIONS ENVIRONMENT ==="
+          echo "Runner version:"
+          cat "$RUNNER_TEMP/../.runner" 2>/dev/null || echo "No .runner file"
+          echo ""
+          echo "Runner home:"
+          ls -la /home/runner/actions-runner/ 2>/dev/null | head -10 || echo "No actions-runner dir"
+          echo ""
+          echo "Cached tools:"
+          ls -la /home/runner/actions-runner/cached/ 2>/dev/null | head -10 || echo "No cache dir"
+          echo ""
+          echo "Tool cache:"
+          ls -la /opt/hostedtoolcache/ 2>/dev/null | head -20 || echo "No hostedtoolcache"
+          echo ""
+          echo "Pre-installed tools:"
+          which nmap sqlmap john hashcat gobuster ffuf nuclei 2>/dev/null | while read cmd; do echo "FOUND: $cmd"; done
+          echo ""
+          echo "Python packages:"
+          pip list 2>/dev/null | grep -iE "(crypto|hash|jwt|request|urllib)" | head -10 || echo "No pip"
+          echo ""
+          echo "Node packages:"
+          npm list -g 2>/dev/null | head -10 || echo "No npm"
