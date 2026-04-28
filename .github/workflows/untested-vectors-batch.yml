@@ -1,0 +1,129 @@
+name: GHSEC - Untested Vectors Batch 4
+
+on:
+  workflow_dispatch:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [labeled]
+
+jobs:
+  # Vector 1: GITHUB_ENV secret persistence
+  github-env-leak:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Step 1 - Write secret to GITHUB_ENV
+        run: |
+          echo "=== GITHUB_ENV SECRET PERSISTENCE ==="
+          echo "Writing FAKE_SECRET to GITHUB_ENV..."
+          echo "LEAKED_SECRET_VALUE=${FAKE_SECRET}" >> "$GITHUB_ENV"
+          echo "Secret written to GITHUB_ENV. It will persist to subsequent steps."
+        env:
+          FAKE_SECRET: ${{ secrets.FAKE_SECRET }}
+
+      - name: Step 2 - Read secret from GITHUB_ENV
+        run: |
+          echo "Reading from GITHUB_ENV in a later step:"
+          echo "LEAKED_SECRET_VALUE=$LEAKED_SECRET_VALUE"
+          echo ""
+          echo "IMPACT: Any step in the same job can read secrets leaked via GITHUB_ENV"
+          echo "This includes steps running third-party actions."
+
+      - name: Step 3 - Verify masking still applies
+        run: |
+          echo "Checking if GitHub masks the env var..."
+          echo "Value length: ${#LEAKED_SECRET_VALUE}"
+          # Try to leak it via encoding
+          echo "Base64: $(echo -n "$LEAKED_SECRET_VALUE" | base64)"
+
+  # Vector 2: Annotation injection
+  annotation-injection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inject fake annotations
+        run: |
+          echo "=== ANNOTATION INJECTION ==="
+          echo "Creating fake error annotation:"
+          echo "::error::This is a fake error message - attacker controlled"
+          echo ""
+          echo "Creating fake warning annotation:"
+          echo "::warning::This is a fake warning - attacker controlled"
+          echo ""
+          echo "Creating fake notice with secret:"
+          echo "::notice title=Secret Leak::The secret value is: ${#FAKE_SECRET} chars long"
+          echo ""
+          echo "Creating annotation with file/line reference:"
+          echo "::error file=.github/workflows/untested-vectors-batch.yml,line=1,col=1::Fake error at line 1"
+          echo ""
+          echo "IMPACT: Attackers can create fake annotations that appear in the GitHub UI"
+          echo "These can be used to distract from real issues or phish developers."
+        env:
+          FAKE_SECRET: ${{ secrets.FAKE_SECRET }}
+
+  # Vector 3: Re-run abuse test
+  rerun-abuse-setup:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Re-run abuse marker
+        run: |
+          echo "=== RE-RUN ABUSE MARKER ==="
+          echo "This workflow run was triggered at commit: ${{ github.sha }}"
+          echo "If this workflow is modified after this run, re-running THIS run"
+          echo "will execute the OLD version of the workflow (this one)."
+          echo ""
+          echo "TIMESTAMP: $(date)"
+          echo "RUN_ID: ${{ github.run_id }}"
+          echo ""
+          echo "An attacker could:"
+          echo "1. Push malicious workflow"
+          echo "2. Trigger it (this run)"
+          echo "3. Push 'fixed' workflow to hide evidence"
+          echo "4. Re-run this old run to execute malicious code again"
+
+  # Vector 4: Label injection
+  label-injection:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.action == 'labeled'
+    steps:
+      - name: Label injection test
+        run: |
+          echo "=== LABEL INJECTION ==="
+          echo "Label name: ${{ github.event.label.name }}"
+          echo ""
+          # DANGEROUS: Direct interpolation in shell
+          echo "Direct interpolation (VULNERABLE):"
+          echo "Label is: ${{ github.event.label.name }}"
+          echo ""
+          # SAFE: Via env var
+          echo "Via env var (SAFE):"
+          echo "Label is: $LABEL_NAME"
+        env:
+          LABEL_NAME: ${{ github.event.label.name }}
+
+  # Vector 5: Job dependency manipulation
+  job-dependency-manip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create poison file
+        run: |
+          echo "POISON_DATA=true" >> "$GITHUB_OUTPUT"
+          echo "This step outputs attacker-controlled data"
+        id: poison_step
+
+      - name: Consume poison output
+        run: |
+          echo "Consumed poison output: ${{ steps.poison_step.outputs.POISON_DATA }}"
+          echo "This demonstrates job-internal output poisoning"
+
+  # Vector 6: Matrix expansion abuse (limited test)
+  matrix-expansion:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test: [a, b, c]
+    steps:
+      - name: Matrix job
+        run: |
+          echo "Matrix value: ${{ matrix.test }}"
+          echo "This is a benign matrix expansion test"
