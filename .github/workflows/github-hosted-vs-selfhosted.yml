@@ -1,0 +1,92 @@
+name: GHSEC - GitHub-Hosted Runner Attack Surface Test
+
+on:
+  workflow_dispatch:
+  issues:
+    types: [opened]
+
+jobs:
+  enumerate-capabilities:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Who am I
+        run: |
+          echo "=== IDENTITY ==="
+          whoami
+          id
+          hostname
+          echo ""
+          
+      - name: Sudo check
+        run: |
+          echo "=== SUDO ACCESS ==="
+          sudo -n whoami 2>&1 || echo "NO SUDO (expected on GitHub-hosted)"
+          echo ""
+          
+      - name: Filesystem access
+        run: |
+          echo "=== FILESYSTEM ==="
+          echo "Home: $HOME"
+          ls -la $HOME
+          echo ""
+          echo "Can I read /etc/passwd?"
+          cat /etc/passwd | head -3 || echo "BLOCKED"
+          echo ""
+          echo "Can I read /etc/shadow?"
+          cat /etc/shadow 2>&1 | head -3 || echo "BLOCKED (expected)"
+          echo ""
+          
+      - name: Network access
+        run: |
+          echo "=== NETWORK ==="
+          echo "Internal IP:"
+          hostname -I 2>/dev/null || ip addr show 2>/dev/null | grep "inet " | head -3
+          echo ""
+          echo "Can I reach the metadata service?"
+          curl -s --max-time 3 http://169.254.169.254/latest/meta-data/ 2>&1 | head -5 || echo "NO METADATA ACCESS (expected)"
+          echo ""
+          echo "Can I scan internal network?"
+          nmap -sn 10.0.0.0/24 2>&1 | head -5 || echo "NO NMAP (expected)"
+          echo ""
+          
+      - name: Docker access
+        run: |
+          echo "=== DOCKER ==="
+          docker ps 2>&1 | head -5 || echo "NO DOCKER SOCKET (expected on GitHub-hosted)"
+          echo ""
+          
+      - name: Persistence check
+        run: |
+          echo "=== PERSISTENCE ==="
+          echo "Writing test file to /tmp..."
+          echo "PERSISTENCE_TEST" > /tmp/ghsec_persist_test.txt
+          echo "File written. Will it survive? (No - VM is destroyed after job)"
+          echo ""
+          
+      - name: Secret access test
+        run: |
+          echo "=== SECRET ACCESS ==="
+          echo "Secret value length: ${#FAKE_SECRET}"
+          echo "Secret is accessible: YES (this is the same on both runner types)"
+        env:
+          FAKE_SECRET: ${{ secrets.FAKE_SECRET }}
+          
+      - name: Cross-job persistence attempt
+        run: |
+          echo "=== CROSS-JOB PERSISTENCE ==="
+          echo "This job cannot read files from previous jobs"
+          echo "Previous job artifact:"
+          ls -la /tmp/ghsec_persist_test.txt 2>&1 || echo "GONE (expected - fresh VM)"
+
+  second-job-fresh-vm:
+    runs-on: ubuntu-latest
+    needs: enumerate-capabilities
+    steps:
+      - name: Check for previous job artifacts
+        run: |
+          echo "=== FRESH VM VERIFICATION ==="
+          echo "Looking for file from Job 1:"
+          ls -la /tmp/ghsec_persist_test.txt 2>&1 || echo "NOT FOUND - Fresh VM confirmed"
+          echo ""
+          echo "Process list (should be minimal):"
+          ps aux | wc -l
