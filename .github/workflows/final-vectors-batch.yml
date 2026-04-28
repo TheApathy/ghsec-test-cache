@@ -1,0 +1,210 @@
+name: GHSEC - Final Untested Vectors Batch
+
+on:
+  workflow_dispatch:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [labeled]
+
+jobs:
+  # Vector: Expression injection in 'with:' (action inputs)
+  expression-injection-with:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues'
+    steps:
+      - name: Checkout with path traversal attempt
+        uses: actions/checkout@v4
+        with:
+          path: ${{ github.event.issue.title }}
+      - name: Test action input injection
+        uses: actions/checkout@v4
+        with:
+          repository: TheApathy/ghsec-test-cache
+          ref: main
+          path: test-checkout
+      - name: Show checked out content
+        run: |
+          echo "=== PATH TRAVERSAL / INPUT INJECTION TEST ==="
+          echo "Attempted checkout path: ${{ github.event.issue.title }}"
+          ls -la test-checkout/ | head -10 || echo "No test-checkout dir"
+
+  # Vector: JSON injection via fromJSON
+  json-injection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test fromJSON with malicious payload
+        run: |
+          echo "=== JSON INJECTION TEST ==="
+          # Simulate attacker-controlled JSON
+          MALICIOUS_JSON='{"key":"value","cmd":"; echo PWNED_JSON; id; #"}'
+          echo "Input JSON: $MALICIOUS_JSON"
+          
+          # Parse with fromJSON (simulated)
+          echo "Parsed value: $(echo '$MALICIOUS_JSON' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('cmd',''))")"
+          
+          # Test direct interpolation danger
+          echo "Direct echo: ${{ github.event.issue.title || 'safe-default' }}"
+
+  # Vector: SARIF spoofing
+  sarif-spoof:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create fake SARIF file
+        run: |
+          echo "=== SARIF SPOOFING TEST ==="
+          cat > fake_results.sarif << 'EOF'
+          {
+            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [{
+              "tool": {"driver": {"name": "GHSEC Fake Scanner", "informationUri": "https://evil.com"}},
+              "results": [{
+                "ruleId": "FAKE-001",
+                "message": {"text": "Critical vulnerability found - this is a fake result injected by attacker"},
+                "level": "error",
+                "locations": [{
+                  "physicalLocation": {
+                    "artifactLocation": {"uri": "src/main.py"},
+                    "region": {"startLine": 1, "startColumn": 1}
+                  }
+                }]
+              }]
+            }]
+          }
+          EOF
+          echo "Fake SARIF created:"
+          cat fake_results.sarif | python3 -m json.tool | head -20
+          echo ""
+          echo "This could be uploaded to GitHub Security tab via upload-sarif"
+          echo "and appear as legitimate security findings."
+
+  # Vector: Dependabot config injection
+  dependabot-injection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create malicious dependabot config
+        run: |
+          echo "=== DEPENDABOT CONFIG INJECTION ==="
+          mkdir -p .github
+          cat > .github/dependabot.yml << 'EOF'
+          version: 2
+          updates:
+            - package-ecosystem: "npm"
+              directory: "/"
+              schedule:
+                interval: "daily"
+              # Malicious: dependabot will try to access this private registry
+              registries:
+                npm-npmjs:
+                  type: npm-registry
+                  url: https://registry.npmjs.org
+                  token: ${{ secrets.FAKE_SECRET }}
+          EOF
+          echo "Created malicious dependabot.yml:"
+          cat .github/dependabot.yml
+          echo ""
+          echo "An attacker could commit this to trigger dependabot"
+          echo "to exfiltrate secrets to attacker-controlled registries."
+
+  # Vector: Fine-grained PAT scope test
+  pat-scope-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test token scopes
+        run: |
+          echo "=== PAT SCOPE TEST ==="
+          # Test what the runner token can access
+          echo "GITHUB_TOKEN permissions:"
+          curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY" | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); print('Repo:', d.get('name','ERROR'), '| Private:', d.get('private','?'))"
+          
+          echo ""
+          echo "Testing GITHUB_TOKEN for write access..."
+          curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues" \
+            -d '{"title":"GHSEC PAT Test","body":"Testing token scope"}' | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); print('Issue created:', d.get('number','FAILED'))"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Vector: Git signature bypass
+  git-signature-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test unsigned commit behavior
+        run: |
+          echo "=== GIT SIGNATURE BYPASS TEST ==="
+          git config --global user.email "attacker@evil.com"
+          git config --global user.name "Attacker"
+          git init /tmp/ghsec-git-test
+          cd /tmp/ghsec-git-test
+          echo "malicious" > file.txt
+          git add file.txt
+          git commit -m "Unsigned commit by fake author"
+          echo ""
+          git log --format="%H %an <%ae> %G?" -1
+          echo ""
+          echo "Commit created with fake author but NO signature."
+          echo "If branch protection requires signed commits,"
+          echo "this would be blocked. Otherwise, it passes."
+
+  # Vector: Reusable workflow path traversal
+  reusable-path-traversal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Attempt path traversal in reusable workflow
+        run: |
+          echo "=== REUSABLE WORKFLOW PATH TRAVERSAL ==="
+          echo "Testing if '../' or absolute paths work in uses:"
+          echo ""
+          echo "Legal paths:"
+          echo "  uses: ./.github/workflows/my-workflow.yml"
+          echo "  uses: owner/repo/.github/workflows/workflow.yml@ref"
+          echo ""
+          echo "Potentially dangerous:"
+          echo "  uses: ./../other-repo/.github/workflows/workflow.yml"
+          echo "  uses: /absolute/path/to/workflow.yml"
+          echo ""
+          echo "These would fail at parsing time, but let's verify."
+
+  # Vector: Action dependency confusion
+  action-dep-confusion:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test action reference patterns
+        run: |
+          echo "=== ACTION DEPENDENCY CONFUSION ==="
+          echo "Dangerous patterns:"
+          echo "  uses: actions/checkout@v4  ← tag, mutable"
+          echo "  uses: actions/checkout@main  ← branch, mutable"
+          echo ""
+          echo "Safe patterns:"
+          echo "  uses: actions/checkout@a81bbbf...  ← SHA, immutable"
+          echo ""
+          echo "An attacker who compromises the action maintainer"
+          echo "can force-push a malicious commit to the tag/branch."
+
+  # Vector: PR description command injection pattern
+  pr-command-injection:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: PR body analysis
+        run: |
+          echo "=== PR DESCRIPTION COMMAND INJECTION ==="
+          echo "PR Title: ${{ github.event.pull_request.title }}"
+          echo "PR Body length: ${#PR_BODY}"
+          echo ""
+          echo "Common patterns that trigger CI:"
+          echo "  /ok-to-test"
+          echo "  /test"
+          echo "  /deploy"
+          echo "  /run-workflow"
+          echo ""
+          echo "If a workflow parses PR body for these commands,"
+          echo "an attacker can trigger actions by including them."
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
