@@ -1,0 +1,174 @@
+name: GHSEC - The Last 8 Testable Vectors
+
+on:
+  workflow_dispatch:
+  project:
+    types: [created, edited, closed]
+  project_card:
+    types: [created, moved, converted]
+  project_column:
+    types: [created, moved, deleted]
+  push:
+    branches-ignore:
+      - main
+  pull_request:
+    types: [opened, edited, synchronize]
+  check_run:
+    types: [created, completed, rerequested]
+
+jobs:
+  # Vector 1: project_v2 / project / project_card / project_column triggers
+  project-trigger-test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'project' || github.event_name == 'project_card' || github.event_name == 'project_column'
+    steps:
+      - name: Project event details
+        run: |
+          echo "=== PROJECT TRIGGER TEST ==="
+          echo "Event name: ${{ github.event_name }}"
+          echo "Action: ${{ github.event.action }}"
+          echo "Project ID: ${{ github.event.project.id || 'N/A' }}"
+          echo "Secret accessible: checking..."
+          echo "Secret length: ${#FAKE_SECRET}"
+        env:
+          FAKE_SECRET: ${{ secrets.FAKE_SECRET }}
+
+  # Vector 2: Push to non-default branch
+  branch-push-test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+    steps:
+      - name: Branch push analysis
+        run: |
+          echo "=== PUSH TO NON-DEFAULT BRANCH ==="
+          echo "Ref: ${{ github.ref }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit message: ${{ github.event.head_commit.message }}"
+          echo "Author: ${{ github.event.head_commit.author.name }}"
+          echo ""
+          echo "DANGER: Attacker can push to any branch and trigger workflows"
+          echo "if branch protection doesn't require PRs for all branches."
+          echo ""
+          echo "Secret accessible: ${#FAKE_SECRET}"
+        env:
+          FAKE_SECRET: ${{ secrets.FAKE_SECRET }}
+
+  # Vector 3: PR description command injection
+  pr-command-parse:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Parse PR body for commands
+        run: |
+          echo "=== PR DESCRIPTION COMMAND INJECTION ==="
+          echo "PR Title: $PR_TITLE"
+          echo "PR Body:"
+          echo "$PR_BODY"
+          echo ""
+          echo "Looking for command patterns..."
+          echo "$PR_BODY" | grep -iE "^/(ok-to-test|test|deploy|run|lgtm|approve)" && echo "COMMAND FOUND!" || echo "No commands found"
+          echo ""
+          echo "If this workflow parsed PR body and executed based on commands,"
+          echo "an attacker could trigger arbitrary workflows via PR description."
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+
+  # Vector 4: Check_run spoofing
+  check-spoof:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'check_run'
+    steps:
+      - name: Check run analysis
+        run: |
+          echo "=== CHECK_RUN EVENT ==="
+          echo "Check name: ${{ github.event.check_run.name }}"
+          echo "Status: ${{ github.event.check_run.status }}"
+          echo "Conclusion: ${{ github.event.check_run.conclusion }}"
+          echo "App: ${{ github.event.check_run.app.name }}"
+
+  # Vector 5: Branch protection admin override test
+  # This runs on workflow_dispatch and tests if admin can bypass
+  admin-override-test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Check branch protection
+        run: |
+          echo "=== BRANCH PROTECTION CHECK ==="
+          curl -s -H "Authorization: token $ADMIN_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/branches/main/protection" | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); 
+          if 'message' in d and d['message'] == 'Branch not protected':
+            print('Branch protection: DISABLED')
+            print('Admin can push directly: YES')
+          else:
+            print('Branch protection: ENABLED')
+            print('Settings:', json.dumps(d, indent=2)[:500])
+          "
+          echo ""
+          echo "If branch protection requires PRs but allows admin override,"
+          echo "an admin (or compromised admin account) can push malicious code directly."
+        env:
+          ADMIN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Vector 6: CODEOWNERS bypass test
+  codeowners-test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Check CODEOWNERS
+        run: |
+          echo "=== CODEOWNERS CHECK ==="
+          if [ -f .github/CODEOWNERS ]; then
+            echo "CODEOWNERS file exists:"
+            cat .github/CODEOWNERS
+          else
+            echo "No CODEOWNERS file found"
+            echo "Creating test CODEOWNERS..."
+            echo "* @TheApathy" > .github/CODEOWNERS
+            echo "Created: * @TheApathy"
+          fi
+          echo ""
+          echo "An attacker could modify CODEOWNERS in a PR to redirect"
+          echo "required reviews to themselves or a compromised account."
+
+  # Vector 7: Suggested changes contribution test
+  suggested-changes-test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Suggested changes analysis
+        run: |
+          echo "=== SUGGESTED CHANGES TEST ==="
+          echo "PR number: ${{ github.event.pull_request.number }}"
+          echo "Actor: ${{ github.actor }}"
+          echo ""
+          echo "If Studious5901 creates a PR review with 'suggested changes',"
+          echo "and TheApathy accepts them, does it count as a contribution"
+          echo "that bypasses first-time contributor requirements?"
+
+  # Vector 8: Fork chain escalation
+  fork-chain-test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Fork analysis
+        run: |
+          echo "=== FORK CHAIN ESCALATION ==="
+          curl -s -H "Authorization: token $TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/forks" | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); 
+          forks = d if isinstance(d, list) else []
+          print(f'Number of forks: {len(forks)}')
+          for f in forks[:3]:
+            print(f'  Fork: {f.get(\"full_name\",\"?\")}')
+          "
+          echo ""
+          echo "An attacker could:"
+          echo "1. Fork the repo"
+          echo "2. Get a friend to fork THEIR fork"
+          echo "3. Submit PR from the nested fork"
+          echo "4. Potentially bypass some trust checks"
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
