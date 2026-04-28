@@ -1,0 +1,107 @@
+name: GHSEC - Remaining Untested Vectors
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # Vector: Artifact name collision
+  artifact-collision-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upload artifact with generic name
+        run: |
+          echo "MALICIOUS_BUILD=true" > build_output.txt
+          echo "This artifact uses a generic name that could collide with other runs"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: build_output.txt
+          overwrite: true
+
+  artifact-collision-download:
+    runs-on: ubuntu-latest
+    needs: artifact-collision-upload
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+      - name: Read potentially poisoned artifact
+        run: |
+          echo "=== ARTIFACT COLLISION TEST ==="
+          cat build_output.txt
+          echo ""
+          echo "If another run overwrote this artifact with the same name,"
+          echo "we would read their data instead of ours."
+
+  # Vector: Cache size DoS attempt
+  cache-dos:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create large cache payload
+        run: |
+          echo "=== CACHE SIZE DoS TEST ==="
+          echo "Creating 100MB test file..."
+          dd if=/dev/urandom of=/tmp/large_cache_file bs=1M count=100 2>/dev/null
+          echo "File size: $(du -h /tmp/large_cache_file | cut -f1)"
+      - name: Cache the large file
+        uses: actions/cache@v4
+        with:
+          path: /tmp/large_cache_file
+          key: ghsec-dos-test-${{ github.run_id }}
+      - name: Verify cache
+        run: |
+          if [ -f /tmp/large_cache_file ]; then
+            echo "Cache restored successfully"
+            echo "Size: $(du -h /tmp/large_cache_file | cut -f1)"
+          else
+            echo "Cache not found"
+          fi
+
+  # Vector: Fine-grained PAT scope test
+  pat-scope-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test classic PAT scope
+        run: |
+          echo "=== PAT SCOPE TEST ==="
+          echo "Testing what the classic PAT can access..."
+          curl -s -H "Authorization: token $CLASSIC_PAT" \
+            "https://api.github.com/user" | python3 -c "import sys,json; d=json.load(sys.stdin); print('Classic PAT login:', d.get('login','ERROR'))"
+          echo ""
+          echo "Testing repo access with classic PAT..."
+          curl -s -H "Authorization: token $CLASSIC_PAT" \
+            "https://api.github.com/repos/TheApathy/ghsec-test-cache" | python3 -c "import sys,json; d=json.load(sys.stdin); print('Repo access:', d.get('name','ERROR'))"
+        env:
+          CLASSIC_PAT: ${{ secrets.FAKE_SECRET }}
+
+  # Vector: Job dependency manipulation with condition
+  dependency-manip:
+    runs-on: ubuntu-latest
+    if: github.actor == 'TheApathy' || github.actor == 'Studious5901'
+    steps:
+      - name: Conditional job execution
+        run: |
+          echo "=== JOB DEPENDENCY MANIPULATION ==="
+          echo "This job ran because actor is: ${{ github.actor }}"
+          echo "An attacker-controlled PR/issue could set the actor"
+          echo "and trigger conditional jobs"
+
+  # Vector: Environment variable key injection
+  env-key-injection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test env var key patterns
+        run: |
+          echo "=== ENV VAR KEY INJECTION ==="
+          # Test if we can create env vars with special characters
+          echo "NORMAL_VAR=value" >> "$GITHUB_ENV"
+          echo "UPPER_CASE=value" >> "$GITHUB_ENV"
+          echo "test-with-dashes=value" >> "$GITHUB_ENV"
+          echo "test_with_underscores=value" >> "$GITHUB_ENV"
+          echo "ALL VAR NAMES WRITTEN"
+      - name: Read back env vars
+        run: |
+          echo "Normal: $NORMAL_VAR"
+          echo "Upper: $UPPER_CASE"
+          echo "Dashes: $test-with-dashes"
+          echo "Underscores: $test_with_underscores"
